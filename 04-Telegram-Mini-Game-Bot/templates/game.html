@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Click Game</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: var(--tg-theme-bg-color, #f5f5f5);
+            color: var(--tg-theme-text-color, #222);
+            -webkit-tap-highlight-color: transparent;
+        }
+        #game-container {
+            max-width: 100%;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #click-area {
+            width: 200px;
+            height: 200px;
+            margin: 20px auto;
+            background: var(--tg-theme-button-color, #0088cc);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--tg-theme-button-text-color, #fff);
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.1s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        #score-display {
+            font-size: 28px;
+            margin: 15px 0;
+            color: var(--tg-theme-text-color, #222);
+        }
+        #username-display {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+        .btn {
+            padding: 12px 24px;
+            background: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-button-text-color, #fff);
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 8px;
+            transition: opacity 0.2s;
+        }
+        .btn:active {
+            opacity: 0.8;
+        }
+        .submitting {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="username-display">Hello, <span id="username">Player</span>!</div>
+        <div id="score-display">Score: <span id="score">0</span></div>
+        <div id="click-area">TAP ME!</div>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        
+        // Game state
+        let score = 0;
+        let username = "Player";
+        let isSubmitting = false;
+        
+        // DOM elements
+        const scoreDisplay = document.getElementById('score');
+        const usernameDisplay = document.getElementById('username');
+        const clickArea = document.getElementById('click-area');
+        const gameContainer = document.getElementById('game-container');
+        
+        // Initialize the game
+        function initGame() {
+            if (tg) {
+                // Expand to full available height
+                tg.expand();
+                
+                // Set up theme change handler
+                tg.onEvent('themeChanged', updateTheme);
+                tg.onEvent('viewportChanged', updateLayout);
+                
+                // Get user data
+                updateUserData();
+                
+                // Set up main button
+                setupMainButton();
+                
+                console.log("Telegram WebApp initialized. Color scheme:", tg.colorScheme);
+            }
+            
+            // Update UI with initial values
+            updateTheme();
+            updateLayout();
+            
+            // Set up game mechanics
+            setupEventListeners();
+        }
+        
+        function updateUserData() {
+            if (!tg) return;
+            
+            const user = tg.initDataUnsafe?.user;
+            if (user) {
+                username = user.first_name || `User${user.id}`;
+                if (user.username) {
+                    username += ` (@${user.username})`;
+                }
+                usernameDisplay.textContent = username;
+            }
+        }
+        
+        function setupMainButton() {
+            if (!tg) return;
+            
+            tg.MainButton.setText("SUBMIT SCORE");
+            tg.MainButton.onClick(handleSubmit);
+            tg.MainButton.enable().show();
+        }
+        
+        function setupEventListeners() {
+            clickArea.addEventListener('click', handleClick);
+            
+            // Cleanup handler
+            window.addEventListener('beforeunload', cleanup);
+        }
+        
+        function cleanup() {
+            clickArea.removeEventListener('click', handleClick);
+            window.removeEventListener('beforeunload', cleanup);
+            
+            if (tg) {
+                tg.offEvent('themeChanged', updateTheme);
+                tg.offEvent('viewportChanged', updateLayout);
+            }
+        }
+        
+        function handleClick() {
+            if (isSubmitting) return;
+            
+            score++;
+            scoreDisplay.textContent = score;
+            
+            // Visual feedback
+            clickArea.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                clickArea.style.transform = 'scale(1)';
+            }, 100);
+            
+            // Enable MainButton after first click
+            if (tg && score === 1) {
+                tg.MainButton.enable().show();
+            }
+        }
+        
+        async function handleSubmit() {
+        if (isSubmitting) return;
+        isSubmitting = true;
+
+        // Visual feedback
+        gameContainer.classList.add('submitting');
+        if (tg) tg.MainButton.showProgress();
+
+        const data = {
+            action: 'submit_score',
+            username: username,
+            score: score,
+            platform: 'telegram',
+            timestamp: new Date().toISOString(),
+            initData: tg?.initData || ''
+        };
+
+        console.log("Submitting data:", data);
+
+        try {
+            // Send data directly to the webhook endpoint
+            const response = await fetch('/webhook', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-Init-Data': tg?.initData || ''
+                },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+            console.log('Submission result:', result);
+
+            if (tg) tg.close();
+            else alert(`Score ${score} submitted!`);
+        } catch (error) {
+            console.error('Submission failed:', error);
+            if (tg) {
+                tg.MainButton.hideProgress();
+                tg.showAlert(`Submission failed: ${error.message}`);
+            } else {
+                alert('Submission failed. Please try again.');
+            }
+        } finally {
+            isSubmitting = false;
+            gameContainer.classList.remove('submitting');
+            if (tg) tg.MainButton.hideProgress();
+        }
+    }
+
+        
+        function updateTheme() {
+            if (!tg) return;
+            
+            document.body.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff');
+            document.body.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000');
+            document.body.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#999999');
+            document.body.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#0088cc');
+            document.body.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+        }
+        
+        function updateLayout() {
+            if (!tg || !tg.viewportHeight) return;
+            
+            document.getElementById('game-container').style.minHeight = `${tg.viewportHeight}px`;
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initGame);
+    </script>
+</body>
+</html>
